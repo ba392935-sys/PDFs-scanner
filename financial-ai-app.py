@@ -162,7 +162,7 @@ if uploaded_file and os.environ.get("GROQ_API_KEY"):
             with open(temp_filename, "wb") as f: f.write(uploaded_file.getbuffer())
             
             df, full_text = extract_and_parse_pdf(temp_filename)
-            llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+            llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0)
             
             st.session_state.df = df
             st.session_state.full_text = full_text
