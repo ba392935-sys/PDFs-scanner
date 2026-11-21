@@ -79,6 +79,20 @@ def extract_and_parse_pdf(file_path):
 
 # --- AI BRAIN (Math + Text Router) ---
 def ask_question(question, df, full_text, llm):
+    q_lower = question.lower()
+    
+    # 🚨 THE SAFE TRAP: Intercept general "transaction" questions BEFORE AI gets confused
+    is_transaction_q = "transaction" in q_lower
+    is_math_q = any(w in q_lower for w in ["total", "sum", "how many", "count"])
+    # If the question contains specific keywords, let the AI handle it instead of the trap
+    is_specific_q = any(w in q_lower for w in ["debit", "credit", "withdraw", "deposit", "tax", "fee", "banco", "atm", "date", "amount", "balance", "largest", "biggest"])
+    
+    if is_transaction_q and is_math_q and not is_specific_q:
+        if not df.empty:
+            count = len(df)
+            volume = df['Credits'].sum() + abs(df['Debits'].sum())
+            return f"📊 **Results:**\n- **Transaction Count:** {count}\n- **Total Volume Moved:** ${volume:,.2f}\n*(Calculated 100% accurately by Python)*"
+
     # 1. Route the question
     router_prompt = f"""Does this question require calculating, summing, counting, or filtering the data table? 
 Reply with exactly one word: "MATH" or "TEXT". Question: {question}"""
@@ -102,11 +116,8 @@ Dataframe is loaded as `df`. Columns: {list(df.columns)}
 STRICT FINANCIAL RULES:
 1. The 'Debits' column represents ALL money OUT (withdrawals, purchases, fees, etc.). Do NOT filter by the word 'withdrawal'. Just sum the 'Debits' column.
 2. The 'Credits' column represents ALL money IN (deposits).
-3. If the user asks for "total transactions" or "all transactions", you MUST output BOTH:
-   - The count: len(df)
-   - The total volume: df['Credits'].sum() + abs(df['Debits'].sum())
-4. If the user asks for something that is NOT in the data (like "tax", "VAT", "interest rate"), DO NOT GUESS. Write code that simply prints: "I don't have that information in the provided document."
-5. ALWAYS format money as f"${{amount:,.2f}}".
+3. If the user asks for something that is NOT in the data (like "tax", "VAT", "interest rate"), DO NOT GUESS. Write code that simply prints: "I don't have that information in the provided document."
+4. ALWAYS format money as f"${{amount:,.2f}}".
 
 Question: {question}
 
@@ -126,7 +137,7 @@ Return ONLY the code. No markdown."""
             
             result = redirected_output.getvalue().strip()
             
-            # If the AI correctly followed Rule 4, it will print the "I don't know" message
+            # If the AI correctly followed Rule 3, it will print the "I don't know" message
             if "I don't have that information" in result:
                 return "I cannot find that information in the document."
                 
