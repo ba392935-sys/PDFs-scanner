@@ -13,7 +13,6 @@ st.title("📊 Financial AI: 100% Accuracy Engine")
 st.markdown("*Upload your Bank Statements or Invoices. Zero hallucinations. Pure Python Math.*")
 
 # --- SECURE API KEY ---
-# It checks Streamlit secrets first, then allows manual entry in the sidebar for testing
 if "GROQ_API_KEY" in st.secrets:
     os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
 
@@ -28,7 +27,7 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("**Disclaimer:** Human-in-the-loop required for final accounting.")
 
-# --- PDF PARSER (Accurate Table Extraction) ---
+# --- PDF PARSER ---
 def extract_and_parse_pdf(file_path):
     full_text = ""
     with pdfplumber.open(file_path) as pdf:
@@ -37,7 +36,6 @@ def extract_and_parse_pdf(file_path):
             if text:
                 full_text += text + "\n"
     
-    # Custom Parser for Ally Bank Layout
     lines = full_text.split('\n')
     transactions = []
     current_tx = None
@@ -66,7 +64,6 @@ def extract_and_parse_pdf(file_path):
                 }
             else:
                 current_tx = None
-        # If the line doesn't start with a date, it's a continuation of the description
         elif current_tx and line.strip():
             current_tx['Description'] += " " + line.strip()
 
@@ -94,20 +91,33 @@ Reply with exactly one word: "MATH" or "TEXT". Question: {question}"""
     # 2. MATH ROUTING (AI writes Pandas code)
     if "MATH" in intent and not df.empty:
         table_csv = df.to_csv(index=False)
+        
+        # STRICT FINANCIAL RULES
         code_prompt = f"""You are a Senior Financial Python Analyst.
 Table Data:
 {table_csv}
 
 Dataframe is loaded as `df`. Columns: {list(df.columns)}
-RULES: Credits = IN, Debits = OUT. If asked for "transactions", give count (len) and volume. Format money as f"${{amount:,.2f}}".
+
+STRICT FINANCIAL RULES:
+1. The 'Debits' column represents ALL money OUT (withdrawals, purchases, fees, etc.). Do NOT filter by the word 'withdrawal'. Just sum the 'Debits' column.
+2. The 'Credits' column represents ALL money IN (deposits).
+3. If the user asks for "total transactions" or "all transactions", you MUST output BOTH:
+   - The count: len(df)
+   - The total volume: df['Credits'].sum() + abs(df['Debits'].sum())
+4. If the user asks for something that is NOT in the data (like "tax", "VAT", "interest rate"), DO NOT GUESS. Write code that simply prints: "I don't have that information in the provided document."
+5. ALWAYS format money as f"${{amount:,.2f}}".
+
 Question: {question}
+
 Write Python code using pandas to answer. Print the answer.
 Return ONLY the code. No markdown."""
+        
         try:
             python_code = llm.invoke(code_prompt).content.strip()
             python_code = python_code.replace("```python", "").replace("```", "").strip()
             
-            # Execute the Python code
+            # Execute the Python code safely and capture the output
             local_vars = {'df': df, 'pd': pd}
             old_stdout = sys.stdout
             redirected_output = sys.stdout = io.StringIO()
@@ -115,6 +125,11 @@ Return ONLY the code. No markdown."""
             sys.stdout = old_stdout
             
             result = redirected_output.getvalue().strip()
+            
+            # If the AI correctly followed Rule 4, it will print the "I don't know" message
+            if "I don't have that information" in result:
+                return "I cannot find that information in the document."
+                
             return f"📊 **Result:**\n{result}\n*(Calculated 100% accurately by Python)*"
         except Exception as e:
             return f"⚠️ Math Error: {str(e)}"
@@ -123,9 +138,14 @@ Return ONLY the code. No markdown."""
     else:
         # Limit text to ~25,000 characters to prevent token limits
         context = full_text[:25000] 
-        prompt_rag = f"""Context: {context}\nQuestion: {question}\nAnswer in ONE short sentence using ONLY the context."""
+        
+        prompt_rag = f"""Context: {context}
+Question: {question}
+
+STRICT RULE: Answer in ONE short sentence using ONLY the context. If the answer is not in the context, say "I don't know".
+"""
         try:
-            return llm.invoke(prompt_rag).content
+            return f"{llm.invoke(prompt_rag).content}"
         except Exception as e:
             return f"⚠️ AI Error: {str(e)}"
 
@@ -142,7 +162,7 @@ if uploaded_file and os.environ.get("GROQ_API_KEY"):
             with open(temp_filename, "wb") as f: f.write(uploaded_file.getbuffer())
             
             df, full_text = extract_and_parse_pdf(temp_filename)
-            llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0)
+            llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
             
             st.session_state.df = df
             st.session_state.full_text = full_text
